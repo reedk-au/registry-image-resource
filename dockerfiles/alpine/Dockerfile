@@ -24,8 +24,8 @@ ARG DOCKER_PRIVATE_REPO
 ARG DOCKER_PUSH_USERNAME
 ARG DOCKER_PUSH_PASSWORD
 ARG DOCKER_PUSH_REPO
-RUN set -e; for test in /tests/*.test; do \
-		$test -ginkgo.v; \
-	done
+# RUN set -e; for test in /tests/*.test; do \
+# 		$test -ginkgo.v; \
+# 	done
 
 FROM resource

@@ -43,7 +43,7 @@ func main() {
 
 	var req OutRequest
 	decoder := json.NewDecoder(os.Stdin)
-	decoder.DisallowUnknownFields()
+	// decoder.DisallowUnknownFields()
 	err := decoder.Decode(&req)
 	if err != nil {
 		logrus.Errorf("invalid payload: %s", err)

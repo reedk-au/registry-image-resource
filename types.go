@@ -155,13 +155,13 @@ func (source *Source) AuthenticateToECR() bool {
 
 	var sessionConfig aws.Config
 	if source.AwsAccessKeyId != "" && source.AwsSecretAccessKey != "" {
- 		sessionConfig = aws.Config{
+		sessionConfig = aws.Config{
 			Region:      aws.String(source.AwsRegion),
 			Credentials: credentials.NewStaticCredentials(source.AwsAccessKeyId, source.AwsSecretAccessKey, ""),
 		}
 	} else {
 		sessionConfig = aws.Config{
-			Region:      aws.String(source.AwsRegion),
+			Region: aws.String(source.AwsRegion),
 		}
 	}
 	mySession := session.Must(session.NewSession(&sessionConfig))
@@ -202,7 +202,7 @@ func (source *Source) AuthenticateToECR() bool {
 
 	// Update username and repository
 	source.Username = "AWS"
-	source.Repository = strings.Join([]string{strings.TrimPrefix(*result.AuthorizationData[0].ProxyEndpoint, "https://"), source.Repository}, "/")
+	// source.Repository = strings.Join([]string{strings.TrimPrefix(*result.AuthorizationData[0].ProxyEndpoint, "https://"), source.Repository}, "/")
 
 	return true
 }
