@@ -1,15 +1,24 @@
 package resource
 
 import (
+	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	v2aws "github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
@@ -18,7 +27,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const DefaultTag = "latest"
+const (
+	DefaultTag               = "latest"
+	getCallerIdentityService = "sts"
+	getCallerIdentityRegion  = "us-east-1"
+)
 
 type Source struct {
 	Repository string `json:"repository"`
@@ -33,6 +46,11 @@ type Source struct {
 	AwsRegion          string `json:"aws_region,omitempty"`
 	AwsRoleArn         string `json:"aws_role_arn,omitempty"`
 
+	GcpIdentityPool         string `json:"gcp_identity_pool"`
+	GcpProject              string `json:"gcp_project"`
+	GcpIdentityPoolProvider string `json:"gcp_identity_pool_provider"`
+	GcpServiceAccount       string `json:"gcp_service_account"`
+
 	Debug bool `json:"debug,omitempty"`
 }
 
@@ -43,6 +61,30 @@ type ContentTrust struct {
 	RepositoryPassphrase string `json:"repository_passphrase"`
 	TLSKey               string `json:"tls_key"`
 	TLSCert              string `json:"tls_cert"`
+}
+type AWSExchangeToken struct {
+	URL     string              `json:"url"`
+	Method  string              `json:"method"`
+	Headers []map[string]string `json:"headers"`
+}
+
+type TokenExchangeRequest struct {
+	Audience           string `json:"audience"`
+	GrantType          string `json:"grantType"`
+	RequestedTokenType string `json:"requestedTokenType"`
+	Scope              string `json:"scope"`
+	SubjectTokenType   string `json:"subjectTokenType"`
+	SubjectToken       string `json:"subjectToken"`
+}
+
+type GenerateAccessTokenRequest struct {
+	Scope []string `json:"scope"`
+}
+
+type TokenExchangeResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int64  `json:"expires_in"`
 }
 
 /* Create notary config directory with following structure
@@ -126,11 +168,11 @@ func (source *Source) Tag() string {
 
 func (source *Source) Metadata() []MetadataField {
 	return []MetadataField{
-		MetadataField{
+		{
 			Name:  "repository",
 			Value: source.Repository,
 		},
-		MetadataField{
+		{
 			Name:  "tag",
 			Value: source.Tag(),
 		},
@@ -139,15 +181,135 @@ func (source *Source) Metadata() []MetadataField {
 
 func (source *Source) MetadataWithAdditionalTags(tags []string) []MetadataField {
 	return []MetadataField{
-		MetadataField{
+		{
 			Name:  "repository",
 			Value: source.Repository,
 		},
-		MetadataField{
+		{
 			Name:  "tags",
 			Value: strings.Join(append(tags, source.Tag()), " "),
 		},
 	}
+}
+
+func (source *Source) AuthenticateToGCP() {
+	logrus.Warnln("Using AWS Role to authenticate to GCP")
+
+	sessionConfig := aws.Config{
+		Region: aws.String(source.AwsRegion),
+	}
+
+	mySession := session.Must(session.NewSession(&sessionConfig))
+
+	callerIdentityRequest := source.buildGetCallerIdentityRequest(mySession)
+	tokenExchangeRequest := source.buildTokenExchangeRequest(callerIdentityRequest)
+	resp, err := http.DefaultClient.Do(tokenExchangeRequest)
+	if err != nil {
+		//handle err
+	}
+	bodyBytes, _ := ioutil.ReadAll(resp.Body)
+	defer resp.Body.Close()
+	tokenExchangeResponse := TokenExchangeResponse{}
+	json.Unmarshal(bodyBytes, &tokenExchangeResponse)
+}
+
+func (source *Source) getGoogleResource() string {
+	return fmt.Sprintf("//iam.googleapis.com/projects/%d/locations/global/workloadIdentityPools/%s/providers/%s", source.GcpProject, source.GcpIdentityPool, source.GcpIdentityPoolProvider)
+}
+
+func (source *Source) buildTokenExchangeRequest(req *http.Request) *http.Request {
+	googleResource := source.getGoogleResource()
+	headers := []map[string]string{
+		{
+			"key":   "Host",
+			"value": req.Header.Get("Host")},
+		{
+			"key":   "Authorization",
+			"value": req.Header.Get("Authorization")},
+		{
+			"key":   "x-amz-date",
+			"value": req.Header.Get("X-Amz-Date")},
+		{
+			"key":   "x-goog-cloud-target-resource",
+			"value": googleResource},
+		{
+			"key":   "x-amz-security-token",
+			"value": os.Getenv("AWS_SESSION_TOKEN")},
+	}
+
+	googleToken := AWSExchangeToken{
+		URL:     "https://sts.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15",
+		Method:  "POST",
+		Headers: headers}
+
+	googleTokenBuffer := new(bytes.Buffer)
+	encoder := json.NewEncoder(googleTokenBuffer)
+	encoder.SetEscapeHTML(false)
+	encoder.Encode(googleToken)
+
+	googleTokenBytes, err := ioutil.ReadAll(googleTokenBuffer)
+
+	if err != nil {
+		// TODO: Handler err
+	}
+
+	googleTokenEncoded := url.QueryEscape(string(googleTokenBytes))
+
+	tokenExchangeRequest := TokenExchangeRequest{
+		Audience:           googleResource,
+		GrantType:          "urn:ietf:params:oauth:grant-type:token-exchange",
+		RequestedTokenType: "urn:ietf:params:oauth:token-type:access_token",
+		Scope:              "https://www.googleapis.com/auth/cloud-platform",
+		SubjectTokenType:   "urn:ietf:params:aws:token-type:aws4_request",
+		SubjectToken:       googleTokenEncoded,
+	}
+
+	tokenExchangeRequestBytes, _ := json.Marshal(tokenExchangeRequest)
+
+	request, _ := http.NewRequest("POST", "https://sts.googleapis.com/v1beta/token", bytes.NewReader(tokenExchangeRequestBytes))
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	request.Header.Set("Host", "https://sts.googleapis.com")
+
+	return request
+}
+
+func (source *Source) buildGetCallerIdentityRequest(session *session.Session) *http.Request {
+	host := "https://sts.amazonaws.com?Action=GetCallerIdentity&Version=2011-06-15"
+	currentTime := time.Now()
+	amzDate := currentTime.Format("2006012T150405Z")
+
+	body := strings.NewReader("")
+	req, _ := http.NewRequest("POST", host, body)
+
+	req.Header.Set("X-AMZ-Date", amzDate)
+	req.Header.Set("Host", "sts.amazonaws.com")
+	req.Header.Set("x-goog-cloud-target-resource", source.getGoogleResource())
+
+	signer := v4.NewSigner()
+
+	h := sha256.New()
+	_, _ = io.Copy(h, body)
+	payloadHash := hex.EncodeToString(h.Sum(nil))
+
+	credentials := stscreds.NewCredentials(session, source.AwsRoleArn)
+
+	values, err := credentials.Get()
+
+	if err != nil {
+		// TODO: handle err
+	}
+
+	err := signer.SignHTTP(context.Background(), v2aws.Credentials{AccessKeyID: values.AccessKeyID, SessionToken: values.SessionToken, SecretAccessKey: values.SecretAccessKey}, req, payloadHash, getCallerIdentityService, getCallerIdentityRegion, currentTime)
+
+	if err != nil {
+		//TODO: handle err
+	}
+
+	// Adding header post signing so it doesn't get added as part of the signed headers
+	// AWS doesn't care but Google validates the signature without this header before sending
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+
+	return req
 }
 
 func (source *Source) AuthenticateToECR() bool {
@@ -155,13 +317,13 @@ func (source *Source) AuthenticateToECR() bool {
 
 	var sessionConfig aws.Config
 	if source.AwsAccessKeyId != "" && source.AwsSecretAccessKey != "" {
- 		sessionConfig = aws.Config{
+		sessionConfig = aws.Config{
 			Region:      aws.String(source.AwsRegion),
 			Credentials: credentials.NewStaticCredentials(source.AwsAccessKeyId, source.AwsSecretAccessKey, ""),
 		}
 	} else {
 		sessionConfig = aws.Config{
-			Region:      aws.String(source.AwsRegion),
+			Region: aws.String(source.AwsRegion),
 		}
 	}
 	mySession := session.Must(session.NewSession(&sessionConfig))
