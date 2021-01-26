@@ -47,13 +47,12 @@ type Source struct {
 	AwsRoleArn         string `json:"aws_role_arn,omitempty"`
 
 	GcpIdentityPool         string `json:"gcp_identity_pool"`
-	GcpProject              string `json:"gcp_project"`
 	GcpIdentityPoolProvider string `json:"gcp_identity_pool_provider"`
+	GcpProject              string `json:"gcp_project"`
 	GcpServiceAccount       string `json:"gcp_service_account"`
 
 	Debug bool `json:"debug,omitempty"`
 }
-
 type ContentTrust struct {
 	Server               string `json:"server"`
 	RepositoryKeyID      string `json:"repository_key_id"`
@@ -192,7 +191,7 @@ func (source *Source) MetadataWithAdditionalTags(tags []string) []MetadataField 
 	}
 }
 
-func (source *Source) AuthenticateToGCP() {
+func (source *Source) AuthenticateToGCP() bool {
 	logrus.Warnln("Using AWS Role to authenticate to GCP")
 
 	sessionConfig := aws.Config{
@@ -205,12 +204,15 @@ func (source *Source) AuthenticateToGCP() {
 	tokenExchangeRequest := source.buildTokenExchangeRequest(callerIdentityRequest)
 	resp, err := http.DefaultClient.Do(tokenExchangeRequest)
 	if err != nil {
-		//handle err
+		logrus.Errorf("Failed to authenticate to GCP: %s", err)
+		return false
 	}
 	bodyBytes, _ := ioutil.ReadAll(resp.Body)
 	defer resp.Body.Close()
 	tokenExchangeResponse := TokenExchangeResponse{}
 	json.Unmarshal(bodyBytes, &tokenExchangeResponse)
+
+	return true
 }
 
 func (source *Source) getGoogleResource() string {
@@ -299,7 +301,7 @@ func (source *Source) buildGetCallerIdentityRequest(session *session.Session) *h
 		// TODO: handle err
 	}
 
-	err := signer.SignHTTP(context.Background(), v2aws.Credentials{AccessKeyID: values.AccessKeyID, SessionToken: values.SessionToken, SecretAccessKey: values.SecretAccessKey}, req, payloadHash, getCallerIdentityService, getCallerIdentityRegion, currentTime)
+	err = signer.SignHTTP(context.Background(), v2aws.Credentials{AccessKeyID: values.AccessKeyID, SessionToken: values.SessionToken, SecretAccessKey: values.SecretAccessKey}, req, payloadHash, getCallerIdentityService, getCallerIdentityRegion, currentTime)
 
 	if err != nil {
 		//TODO: handle err
