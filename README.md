@@ -37,15 +37,18 @@ differences:
   authenticating to the registry. Must be specified for private repos or when
   using `put`.
 
-* `aws_access_key_id`: *Optional. Default `"""`.* The access key ID to use for
+* `aws_access_key_id`: *Optional. Default `""`.* The access key ID to use for
   authenticating with ECR.
 
-* `aws_secret_access_key`: *Optional. Default `"""`.* The secret access key to
+* `aws_secret_access_key`: *Optional. Default `""`.* The secret access key to
   use for authenticating with ECR.
 
-* `aws_region`: *Optional. Default `"`.* The region to use for accessing ECR.
+* `aws_session_token`: *Optional. Default `""`.* The session token to use
+  for authenticating with STS credentials with ECR.
 
-* `aws_role_arn`: *Optional. Default `"`.* If set, then this role will be
+* `aws_region`: *Optional. Default `""`.* The region to use for accessing ECR.
+
+* `aws_role_arn`: *Optional. Default `""`.* If set, then this role will be
   assumed before authenticating to ECR.
 
 * `debug`: *Optional. Default `false`.* If set, progress bars will be disabled
@@ -74,6 +77,8 @@ Fetches an image at a digest.
 #### Parameters
 
 * `format`: *Optional. Default `rootfs`.* The format to fetch as.
+* `skip_download`: *Optional. Default `false`.* Skip downloading the image.
+  Useful only to trigger a job without using the object.
 
 #### Files created by the resource
 
@@ -109,8 +114,8 @@ In this format, the resource will produce the following files:
 ### `out`: Push an image up to the registry under the given tags.
 
 Uploads an image to the registry under the tag configured in `source`.
- 
-If `additional_tags` param is defined then the uploaded image will also be 
+
+If `additional_tags` param is defined then the uploaded image will also be
 tagged with each one of the values specified in that file.
 
 The currently encouraged way to build these images is by using the
@@ -149,7 +154,7 @@ docker build -t registry-image-resource -f dockerfiles/ubuntu/Dockerfile .
 
 #### Integration tests
 
-The integration requires 2 docker repos, one private and one public. The `docker build` 
+The integration requires 2 docker repos, one private and one public. The `docker build`
 step requires setting `--build-args` so the integration will run.
 
 Run the tests with the following command:
