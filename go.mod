@@ -13,6 +13,7 @@ require (
 	github.com/onsi/gomega v1.9.0
 	github.com/sirupsen/logrus v1.5.0
 	github.com/vbauerster/mpb v3.4.0+incompatible
+	golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421 // indirect
 )
 
 go 1.13
