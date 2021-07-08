@@ -25,6 +25,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecr"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/oauth2/google"
 )
 
 const (
@@ -51,6 +52,7 @@ type Source struct {
 	AwsRegion          string `json:"aws_region,omitempty"`
 	AwsRoleArn         string `json:"aws_role_arn,omitempty"`
 
+	GcpAuth                 bool   `json:"gcp_auth,omitempty"`
 	GcpIdentityPool         string `json:"gcp_identity_pool,omitempty"`
 	GcpIdentityPoolProvider string `json:"gcp_identity_pool_provider,omitempty"`
 	GcpProject              string `json:"gcp_project,omitempty"`
@@ -202,8 +204,21 @@ func (source *Source) MetadataWithAdditionalTags(tags []string) []MetadataField 
 }
 
 func (source *Source) AuthenticateToGCP() bool {
-	logrus.Info("Using AWS Role to authenticate to GCP")
 
+	if source.GcpAuth {
+		logrus.Info("Using GCP service account credentials to authenticate to GCP")
+		oauthToken := google.ComputeTokenSource("")
+		token, err := oauthToken.Token()
+		if err != nil {
+			logrus.Errorf("Failed to get access token for GCP: %s", err.Error())
+			return false
+		}
+		source.Username = "oauth2accesstoken"
+		source.Password = token.AccessToken
+		return true
+	}
+
+	logrus.Info("Using AWS Role to authenticate to GCP")
 	var sessionConfig aws.Config
 	if source.AwsAccessKeyID != "" && source.AwsSecretAccessKey != "" {
 		logrus.Info("Authenticating AWS Role with AccessKeyID & SecretAccessKey")

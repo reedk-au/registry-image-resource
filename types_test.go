@@ -46,6 +46,15 @@ var _ = Describe("Source", func() {
 		Expect(source.Tag()).To(Equal("latest"))
 	})
 
+	It("should unmarshal gcp_auth value into a bool", func() {
+		var source resource.Source
+		raw := []byte(`{ "gcp_auth": true }`)
+
+		err := json.Unmarshal(raw, &source)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(source.GcpAuth).To(Equal(true))
+	})
+
 	It("should default unspecified tag to latest", func() {
 		var source resource.Source
 		raw := []byte(`{}`)
