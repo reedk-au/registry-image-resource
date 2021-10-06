@@ -135,6 +135,22 @@ func main() {
 		return
 	}
 
+	digest_file, err := os.Create(filepath.Join(src, fmt.Sprintf("%s.digest", req.Params.Image)))
+	if err != nil {
+		logrus.Errorf("failed to create image digest file: %s", err)
+		os.Exit(1)
+		return
+	}
+	defer digest_file.Close()
+
+	_, err = digest_file.WriteString(digest.String())
+
+	if err != nil {
+		logrus.Errorf("failed to write image digest file: %s", err)
+		os.Exit(1)
+		return
+	}
+
 	logrus.Infof("pushing %s to %s", digest, ref.Name())
 
 	err = resource.RetryOnRateLimit(func() error {
